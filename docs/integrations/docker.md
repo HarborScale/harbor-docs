@@ -1,12 +1,12 @@
 ---
 sidebar_position: 11
 title: Docker Monitoring
-description: Monitor Docker container health, status, and resource usage with Harbor Lighthouse.
+description: Monitor Docker Engine health, aggregate container states, and system resources.
 ---
 
 # Docker Monitoring
 
-This guide explains how to monitor your Docker engine and containers using **Harbor Lighthouse**. The agent connects directly to the local Docker daemon to stream real-time status, resource usage, and uptime metrics for every container running on the host.
+This guide explains how to monitor your Docker Engine using **Harbor Lighthouse**. The agent connects directly to the local Docker daemon to stream real-time host-level statistics, including container state counts, system resource limits, and Swarm status.
 
 **_Repo Link:_** https://github.com/harborscale/harbor-lighthouse
 
@@ -20,8 +20,9 @@ Before starting, ensure you have:
 
 ## How it Works
 
-Unlike other solutions that require you to deploy a separate "sidecar" container to monitor Docker, Lighthouse runs as a lightweight binary on the host system. It communicates with the Docker Engine via the Unix socket (`/var/run/docker.sock` on Linux) or named pipe (on Windows) to fetch statistics without overhead.
+Unlike other solutions that deploy a "sidecar" container, Lighthouse runs as a lightweight binary on the host system. It communicates with the Docker Engine via the Unix socket (`/var/run/docker.sock` on Linux) or named pipe (on Windows). 
 
+**Note on Performance:** The collector uses connection pooling to reuse the Docker client connection and explicitly disables heavy per-container disk usage calculations, ensuring minimal impact on your system even with hundreds of containers.
 
 ---
 
@@ -57,18 +58,6 @@ sudo lighthouse --add --name "docker-host-01" --harbor-id "YOUR_HARBOR_ID" --key
 lighthouse --add --name "docker-host-01" --harbor-id "YOUR_HARBOR_ID" --key "YOUR_API_KEY" --source docker
 ```
 
-**For Self-Hosted / OSS (Linux/macOS):**
-
-```bash
-sudo lighthouse --add --name "docker-host-01" --endpoint "http://YOUR_IP:8000" --key "YOUR_API_KEY" --source docker
-```
-
-**For Self-Hosted / OSS (Windows):**
-
-```powershell
-lighthouse --add --name "docker-host-01" --endpoint "http://YOUR_IP:8000" --key "YOUR_API_KEY" --source docker
-```
-
 ---
 
 ## Configuration
@@ -77,38 +66,45 @@ You can customize the Docker monitor using standard Lighthouse flags.
 
 | Flag | Description | Default |
 | --- | --- | --- |
-| `--interval` | How often to poll container stats (in seconds). | `60` |
-| `--name` | The ID of the Docker Host. Individual containers will be nested under this host. | (Required) |
+| `--interval` | How often to poll engine stats (in seconds). | `60` |
+| `--name` | The unique ID/Name for this Docker Host. | (Required) |
 | `--source` | Must be set to `docker`. | - |
-
-### Example: Fast Polling
-
-If you are debugging a crash loop and need granular data:
-
-**Linux/macOS:**
-```bash
-sudo lighthouse --add --name "debug-host" --harbor-id "123" --key "xyz" --source docker --interval 10
-```
-
-**Windows:**
-```powershell
-lighthouse --add --name "debug-host" --harbor-id "123" --key "xyz" --source docker --interval 10
-```
 
 ---
 
 ## Available Metrics
 
-The `docker` source collects the following data for **each** container:
+The `docker` source collects **Engine-level** metrics. It aggregates the states of all containers on the host rather than streaming stats for individual containers.
+
+### Container Aggregates
 
 | Metric | Description |
 | --- | --- |
-| **Status** | Current state (`running`, `exited`, `paused`, `dead`). |
-| **CPU Usage** | Percentage of CPU used by the container relative to the host. |
-| **Memory Usage** | RAM usage in Megabytes (MB). |
-| **Memory Limit** | The hard limit of memory assigned to the container (if set). |
-| **Uptime** | How long the specific container has been running. |
-| **Restart Count** | Total number of times the engine has restarted this container. |
+| **Total Containers** | Total number of containers on the host. |
+| **Running** | Number of containers in `running` state. |
+| **Exited/Stopped** | Number of containers in `exited` state. |
+| **Paused** | Number of `paused` containers. |
+| **Error/Dead** | Number of containers in `dead` or `restarting` states. |
+
+### Engine & System Resources
+
+| Metric | Description |
+| --- | --- |
+| **Images** | Total number of images stored locally. |
+| **Volumes** | Total number of local Docker volumes. |
+| **Goroutines** | Number of internal Docker goroutines (useful for debugging daemon load). |
+| **CPUs** | Number of CPUs available to the Docker Engine. |
+| **Total Memory** | Total memory available to the Docker Engine. |
+| **File Descriptors** | Number of open file descriptors used by the daemon. |
+
+### Swarm Mode
+
+If the engine is part of a Swarm, the following metrics are populated:
+| Metric | Description |
+| --- | --- |
+| **Swarm State** | Numeric status: `0` (Inactive), `1` (Pending), `2` (Active), `3` (Error). |
+| **Managers** | Number of Swarm managers. |
+| **Nodes** | Total number of nodes in the Swarm. |
 
 ---
 
@@ -121,22 +117,17 @@ The `docker` source collects the following data for **each** container:
 * **Cause:** The Lighthouse agent does not have permission to talk to the Docker Daemon.
 * **Fix:** Ensure the user running the process is in the `docker` group (see Step 1 above), or run Lighthouse with `sudo`.
 
-**"Access denied" (Windows)**
+**"docker_client_init_error"**
 
-* **Cause:** Lighthouse needs Administrator privileges to access Docker.
-* **Fix:** Run PowerShell as Administrator.
+* **Cause:** The agent cannot connect to the Docker API.
+* **Fix:** Check if Docker is running (`docker info`). If Docker was just restarted, the agent will automatically attempt to reconnect on the next interval.
 
-**No containers showing in Dashboard**
+**No data appearing**
 
-* Check if Docker is actually running: `docker ps`
 * Check the agent logs:
+
 ```bash
 lighthouse --logs "docker-host-01"
 ```
 
-* If the logs show success but no data appears, ensure your containers are not in a "Created" state (they must be Running or Exited to report stats).
-
-**High CPU Usage by Agent**
-
-* If you have hundreds of containers, polling every second can be expensive.
-* **Fix:** Increase the interval to 60 seconds or more using `--interval 60`.
+* If you see metrics like `docker_containers_total`, the connection is successful.
