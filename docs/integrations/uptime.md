@@ -20,13 +20,12 @@ Before starting, ensure you have:
 
 ## How it Works
 
-The Lighthouse agent performs periodic HTTP/HTTPS `GET` requests to the specified target. It measures the time taken for the server to respond (latency) and captures the HTTP status code (e.g., `200 OK`, `500 Error`).
-
-
+The Lighthouse agent performs periodic HTTP/HTTPS `GET` requests to the specified target. It captures the standard uptime status and breaks down the request lifecycle into granular timing metrics (DNS lookup, TCP connection, TLS handshake, etc.).
 
 This is useful for:
-* **External Monitoring:** verifying your public website is accessible from the internet.
-* **Internal Monitoring:** checking if internal APIs or dashboards are running inside your private network.
+* **External Monitoring:** Verifying your public website is accessible and checking CDN performance.
+* **Internal Monitoring:** Checking if internal APIs or dashboards are running inside your private network.
+* **Performance Debugging:** Identifying if slowness is caused by DNS resolution, SSL handshakes, or backend processing (TTFB).
 
 ---
 
@@ -71,20 +70,16 @@ The `uptime` collector uses the `--param` flag to pass specific settings. You ca
 | Parameter | Required? | Description | Default |
 | --- | --- | --- | --- |
 | `target_url` | ✅ Yes | The full URL to monitor (must include `http://` or `https://`). | - |
-| `timeout_ms` | ❌ No | How long to wait for a response before marking it as "Down" (in milliseconds). | `5000` (5s) |
+| `timeout_ms` | ❌ No | How long to wait for a response before marking it as "Down" (in milliseconds). | `10000` (10s) |
 
 ### Example: Custom Timeout
 
-To monitor a slow internal service and give it 10 seconds to respond:
+To monitor a slow internal service and extend the timeout to 20 seconds:
 
 **Linux/macOS:**
-```bash
-sudo lighthouse --add --name "slow-service" --harbor-id "123" --key "xyz" --source uptime --param target_url="http://local-service" --param timeout_ms=10000
-```
 
-**Windows:**
-```powershell
-lighthouse --add --name "slow-service" --harbor-id "123" --key "xyz" --source uptime --param target_url="http://local-service" --param timeout_ms=10000
+```bash
+sudo lighthouse --add --name "slow-service" --harbor-id "123" --key "xyz" --source uptime --param target_url="http://local-service" --param timeout_ms=20000
 ```
 
 ---
@@ -93,12 +88,28 @@ lighthouse --add --name "slow-service" --harbor-id "123" --key "xyz" --source up
 
 The collector reports the following data points for every check:
 
+### General Status
+
 | Metric | Description |
 | --- | --- |
 | **Status** | The health state (`up` or `down`). |
 | **Status Code** | The HTTP response code received (e.g., `200`, `404`, `503`). |
-| **Latency** | Time taken to receive the response headers (in milliseconds). |
-| **Availability** | Boolean flag indicating success or failure. |
+| **Total Latency** | Total time taken for the request to complete (in milliseconds). |
+| **Response Size** | Size of the response body in bytes. |
+| **Redirects** | Number of redirects followed during the request. |
+| **Cache Hit** | Detected CDN cache status (`1` for HIT, `0` for MISS/Other). Supports Vercel, Cloudflare, Fastly, Netlify, and generic `x-cache`. |
+
+### Detailed Timings (Waterfalls)
+
+The collector breaks down latency into specific phases to help diagnose bottlenecks:
+
+| Metric | Description |
+| --- | --- |
+| **DNS Lookup** | Time taken to resolve the domain name. |
+| **TCP Connect** | Time taken to establish the TCP connection. |
+| **TLS Handshake** | Time spent negotiating the SSL/TLS secure connection. |
+| **TTFB** | **Time To First Byte**. Time between the request being sent and the first byte of the response being received (indicates backend processing speed). |
+| **Download Time** | Time taken to download the response body after the first byte. |
 
 ---
 
@@ -113,8 +124,8 @@ The collector reports the following data points for every check:
 
 **"Timeout" errors on valid sites**
 
-* **Cause:** The server is responding too slowly for the default 5-second limit.
-* **Fix:** Increase the timeout using `--param timeout_ms=10000`.
+* **Cause:** The server is responding too slowly for the default 10-second limit.
+* **Fix:** Increase the timeout using `--param timeout_ms=20000`.
 
 **SSL/TLS Errors**
 
